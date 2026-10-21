@@ -1327,10 +1327,14 @@ function scrollToProducts() {
 
 /* === INIT === */
 renderProducts('all');
-loadFromStorage();
+loadFromGitHub();
 
 /* === ADMIN PANEL === */
 const ADMIN_CODE = 'akshay01322';
+const GITHUB_TOKEN = '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';
+const GITHUB_REPO = 'akshayshaji940/ab1-ai-selling-store';
+const GITHUB_API = `https://api.github.com/repos/${GITHUB_REPO}`;
+const DATA_FILE = 'data.json';
 
 // Event templates
 const eventTemplates = {
@@ -1405,29 +1409,68 @@ const eventTemplates = {
 let currentEvent = 'halloween';
 let customCoupons = {};
 
-function loadFromStorage() {
-  const stored = localStorage.getItem('ab1_admin_data');
-  if (stored) {
-    const data = JSON.parse(stored);
-    if (data.currentEvent) currentEvent = data.currentEvent;
-    if (data.customCoupons) customCoupons = data.customCoupons;
-    if (data.customProducts) {
-      data.customProducts.forEach(p => {
-        if (!products.find(x => x.id === p.id)) products.push(p);
-      });
+// Load data from GitHub
+async function loadFromGitHub() {
+  try {
+    const response = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/main/${DATA_FILE}?t=${Date.now()}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.currentEvent) currentEvent = data.currentEvent;
+      if (data.customCoupons) customCoupons = data.customCoupons;
+      if (data.customProducts) {
+        data.customProducts.forEach(p => {
+          if (!products.find(x => x.id === p.id)) products.push(p);
+        });
+      }
+      applyEvent(currentEvent);
+      renderProducts(currentFilter);
     }
-    applyEvent(currentEvent);
-    renderProducts(currentFilter);
+  } catch (e) {
+    console.log('Using default data');
   }
 }
 
-function saveToStorage() {
+// Save data to GitHub
+async function saveToGitHub() {
   const data = {
     currentEvent,
     customCoupons,
     customProducts: products.filter(p => p.id > 1000)
   };
-  localStorage.setItem('ab1_admin_data', JSON.stringify(data));
+  
+  try {
+    // Get current file SHA
+    const fileResponse = await fetch(`${GITHUB_API}/contents/${DATA_FILE}`, {
+      headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+    });
+    const fileData = await fileResponse.json();
+    const sha = fileData.sha;
+    
+    // Update file
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const updateResponse = await fetch(`${GITHUB_API}/contents/${DATA_FILE}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: 'Update admin data',
+        content: content,
+        sha: sha
+      })
+    });
+    
+    if (updateResponse.ok) {
+      return true;
+    } else {
+      console.error('Failed to save to GitHub');
+      return false;
+    }
+  } catch (e) {
+    console.error('Error saving to GitHub:', e);
+    return false;
+  }
 }
 
 function applyEvent(eventName) {
@@ -1503,7 +1546,7 @@ function showAdminSection(section) {
   event.target.classList.add('active');
 }
 
-function addNewProduct() {
+async function addNewProduct() {
   const name = document.getElementById('newProductName').value;
   const desc = document.getElementById('newProductDesc').value;
   const originalPrice = parseInt(document.getElementById('newProductOriginal').value);
@@ -1530,30 +1573,38 @@ function addNewProduct() {
   };
   
   products.push(newProduct);
-  saveToStorage();
-  renderProducts(currentFilter);
   
-  alert('Product added successfully!');
-  document.getElementById('newProductName').value = '';
-  document.getElementById('newProductDesc').value = '';
-  document.getElementById('newProductOriginal').value = '';
-  document.getElementById('newProductOffer').value = '';
-  document.getElementById('newProductTags').value = '';
-  document.getElementById('newProductCategories').value = '';
+  const success = await saveToGitHub();
+  if (success) {
+    renderProducts(currentFilter);
+    alert('Product added and synced to GitHub! All visitors will see this change.');
+    document.getElementById('newProductName').value = '';
+    document.getElementById('newProductDesc').value = '';
+    document.getElementById('newProductOriginal').value = '';
+    document.getElementById('newProductOffer').value = '';
+    document.getElementById('newProductTags').value = '';
+    document.getElementById('newProductCategories').value = '';
+  } else {
+    alert('Failed to sync to GitHub. Please try again.');
+    products.pop();
+  }
 }
 
-function changeEvent(eventName) {
+async function changeEvent(eventName) {
   currentEvent = eventName;
   applyEvent(eventName);
-  saveToStorage();
   
-  document.querySelectorAll('.event-card').forEach(c => c.classList.remove('active'));
-  event.target.closest('.event-card').classList.add('active');
-  
-  alert(`${eventTemplates[eventName].name} event activated!`);
+  const success = await saveToGitHub();
+  if (success) {
+    document.querySelectorAll('.event-card').forEach(c => c.classList.remove('active'));
+    event.target.closest('.event-card').classList.add('active');
+    alert(`${eventTemplates[eventName].name} event activated and synced! All visitors will see this change.`);
+  } else {
+    alert('Failed to sync to GitHub. Please try again.');
+  }
 }
 
-function createCoupon() {
+async function createCoupon() {
   const code = document.getElementById('newCouponCode').value.trim().toLowerCase();
   const discount = parseInt(document.getElementById('newCouponDiscount').value);
   const label = document.getElementById('newCouponLabel').value;
@@ -1569,14 +1620,17 @@ function createCoupon() {
     label: `${label} OFF`
   };
   
-  saveToStorage();
-  
-  alert(`Coupon "${code}" created with ${discount}% discount!`);
-  document.getElementById('newCouponCode').value = '';
-  document.getElementById('newCouponDiscount').value = '';
-  document.getElementById('newCouponLabel').value = '';
-  
-  renderCouponList();
+  const success = await saveToGitHub();
+  if (success) {
+    alert(`Coupon "${code}" created and synced! All visitors can now use this coupon.`);
+    document.getElementById('newCouponCode').value = '';
+    document.getElementById('newCouponDiscount').value = '';
+    document.getElementById('newCouponLabel').value = '';
+    renderCouponList();
+  } else {
+    alert('Failed to sync to GitHub. Please try again.');
+    delete customCoupons[code];
+  }
 }
 
 function renderCouponList() {
@@ -1594,11 +1648,16 @@ function renderCouponList() {
   `).join('');
 }
 
-function deleteCoupon(code) {
+async function deleteCoupon(code) {
   if (confirm(`Delete coupon "${code}"?`)) {
     delete customCoupons[code];
-    saveToStorage();
-    renderCouponList();
+    const success = await saveToGitHub();
+    if (success) {
+      renderCouponList();
+      alert('Coupon deleted and synced!');
+    } else {
+      alert('Failed to sync to GitHub. Please try again.');
+    }
   }
 }
 
